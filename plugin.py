@@ -38,7 +38,7 @@ class TimeoutList:
         self.timeout = timeout
 
     def clearTimeout(self):
-        for k, t in self.dict.items():
+        for k, t in list(self.dict.items()):
             if t < (time.time() - self.timeout):
                 del self.dict[k]
 
@@ -262,7 +262,7 @@ class Game:
         if self.questionType == 'kaos':
             for ans in self.answers:
                 if ircutils.toLower(ans) not in self.guessedAnswers:
-                    ans = unicode(ans.decode('utf-8'))
+                    ans = str(ans)
                     hintStr = ''
                     if hintNum == 0:
                         for char in ans:
@@ -297,7 +297,7 @@ class Game:
                             hintStr += self.getMaskedRandom(ansend, divider-1)
                     hint += (' [{0}]' % hintStr)
         else:
-            ans = unicode(self.answers[0].decode('utf-8'))
+            ans = str(self.answers[0])
             if hintNum == 0:
                 for char in ans:
                     if char in self.unmaskedChars:
@@ -340,7 +340,7 @@ class Game:
         for char in letters:
             if char in self.unmaskedChars:
                 hintsList.append(char)
-            elif str.lower(self.removeAccents(char.encode('utf-8'))) in 'aeiou' and unmasked < (len(letters)-1) and lettersInARow < 3:
+            elif str.lower(self.removeAccents(char)) in 'aeiou' and unmasked < (len(letters)-1) and lettersInARow < 3:
                 hintsList.append(char)
                 lettersInARow += 1
                 unmasked += 1
@@ -551,12 +551,12 @@ class Game:
             try:
                 schedule.addEvent(event, time, '%s.trivia' % self.channel)
             except AssertionError as e:
-                log.error('Unable to queue {0} because another event is already scheduled.'.format(event.func_name))
+                log.error('Unable to queue {0} because another event is already scheduled.'.format(__name__))
 
     def removeAccents(self, text):
-        text = unicode(text.decode('utf-8'))
+        text = str(text)
         normalized = unicodedata.normalize('NFKD', text)
-        normalized = u''.join([c for c in normalized if not unicodedata.combining(c)])
+        normalized = ''.join([c for c in normalized if not unicodedata.combining(c)])
         return normalized.encode('utf-8')
 
     def removeExtraSpaces(self, text):
@@ -579,7 +579,19 @@ class Game:
 
     def retrieveQuestion(self):
         # Retrieve and parse question data from database
-        rawData = self.storage.getRandomQuestionNotAsked(self.channel, self.roundStartedAt)
+        dbLocation = self.registryValue('admin.db')
+        threadStorage = Storage(dbLocation)
+        try:
+            rawData = self.storage.getRandomQuestionNotAsked(self.channel, self.roundStartedAt)
+        except Exception as e: #Mostly a result of encoding issues within the database as a migration from py2 to 3
+            badquestion = str(e).split(" with text ")[1]
+            self.sendMessage("There was a problem with this question. I have prepared a fake question to prevent a crash. The original offending question was: " + badquestion)
+            rawData = {
+                          "question": "PANIC QUESTION: This animal is the goodest*dog", "num_answered": 500, "num_missed": 0, "hint_1": None, "hint_2": None, "hint_3": None,
+                          "id": 1
+                        }
+            self.sendMessage(threadStorage.getIDByQuestion(badquestion))
+
         rawQuestion = rawData['question']
         netTimesAnswered = rawData['num_answered'] - rawData['num_missed']
         questionParts = rawQuestion.split('*')
@@ -597,9 +609,9 @@ class Game:
                 questionType = 'uword'
                 ans = questionParts[1]
                 answers.append(str(ans).strip())
-                shuffledLetters = list(unicode(ans.decode('utf-8')))
+                shuffledLetters = list(str(ans))
                 random.shuffle(shuffledLetters)
-                question = 'Unscramble the letters: {0}'.format(' '.join(shuffledLetters)).encode('utf-8')
+                question = 'Unscramble the letters: {0}'.format(' '.join(shuffledLetters))
             else:
                 questionType = 'regular'
                 for ans in questionParts[1:]:
@@ -692,7 +704,7 @@ class Storage:
 
     def chunk(self, qs, rows=10000):
         """ Divides the data into 10000 rows each """
-        for i in xrange(0, len(qs), rows):
+        for i in range(0, len(qs), rows):
             yield qs[i:i+rows]
 
     def countTemporaryQuestions(self, channel=None):
@@ -2623,8 +2635,8 @@ class Logger:
             log.write(' ')
 
     def checkLogNames(self):
-        for (irc, logs) in self.logs.items():
-            for (channel, log) in logs.items():
+        for (irc, logs) in list(self.logs.items()):
+            for (channel, log) in list(logs.items()):
                 name = self.getLogName(channel)
                 if name != log.name:
                     log.close()
@@ -2643,7 +2655,7 @@ class Logger:
             try:
                 name = self.getLogName(channel)
                 logDir = self.getLogDir(irc, channel)
-                log = file(os.path.join(logDir, name), 'a')
+                log = open(os.path.join(logDir, name), 'a')
                 logs[channel] = log
                 return log
             except IOError:
@@ -2739,8 +2751,8 @@ class TriviaTime(callbacks.Plugin):
             return
 
     def _games(self):
-        for (network, games) in self.games.items():
-            for (channel, game) in games.items():
+        for (network, games) in list(self.games.items()):
+            for (channel, game) in list(games.items()):
                 yield game
 
     def die(self):
@@ -2900,11 +2912,11 @@ class TriviaTime(callbacks.Plugin):
     def addZeroWidthSpace(self, text):
         if len(text) <= 1:
             return text
-        s = u'%s\u200b%s' % (text[:1], text[1:])
-        return s.encode('utf-8')
+        s = '%s\u200b%s' % (text[:1], text[1:])
+        return s
 
     def shortHash(self, text):
-        hashText = hashlib.sha1(text).hexdigest()
+        hashText = hashlib.sha1(text.encode('utf-8')).hexdigest()
         hashText = self.numToBase94(int(hashText, 16), 8)
         return hashText
 
@@ -3218,6 +3230,8 @@ class TriviaTime(callbacks.Plugin):
             Parameter is optional, display up to that number. (eg 20 - display 11-20)
             Channel is only required when using the command outside of a channel.
         """
+        if num is None:
+            num = 1
         num = max(num, 10)
         offset = num-9
         dbLocation = self.registryValue('admin.db')
@@ -3335,6 +3349,8 @@ class TriviaTime(callbacks.Plugin):
         List questions pending deletion.
         Channel is only required when using the command outside of a channel.
         """
+        if page is None:
+            page = 1
         hostmask = msg.prefix
         if self.isTriviaMod(hostmask, channel) == False:
             irc.reply('You must be at least a TriviaMod in {0} to use this command.'.format(channel))
@@ -3374,6 +3390,8 @@ class TriviaTime(callbacks.Plugin):
         List edits pending approval.
         Channel is only required when using the command outside of a channel.
         """
+        if page is None:
+            page = 1
         hostmask = msg.prefix
         if self.isTriviaMod(hostmask, channel) == False:
             irc.reply('You must be at least a TriviaMod in {0} to use this command.'.format(channel))
@@ -3411,6 +3429,8 @@ class TriviaTime(callbacks.Plugin):
         List reports pending edit.
         Channel is only required when using the command outside of a channel.
         """
+        if page is None:
+            page = 1
         # Grab list from the database
         dbLocation = self.registryValue('admin.db')
         threadStorage = Storage(dbLocation)
@@ -3443,6 +3463,8 @@ class TriviaTime(callbacks.Plugin):
         List questions awaiting approval.
         Channel is only required when using the command outside of a channel.
         """
+        if page is None:
+            page = 1
         hostmask = msg.prefix
         if self.isTriviaMod(hostmask, channel) == False:
             irc.reply('You must be at least a TriviaMod in {0} to use this command.'.format(channel))
@@ -3484,7 +3506,7 @@ class TriviaTime(callbacks.Plugin):
         threadStorage = Storage(dbLocation)
         totalUsersEver = threadStorage.getNumUser(channel)
         numActiveThisWeek = threadStorage.getNumActiveThisWeek(channel)
-        infoText = ' TriviaTime v1.3.2 by Trivialand on Freenode: https://github.com/tannn/TriviaTime '
+        infoText = ' TriviaTime v2.0.0a Python 3 alpha by #Trivialand on Freenode: https://github.com/DecafMegalodon/TriviaTime '
         self.reply(irc, msg, infoText, prefixNick=False)
         infoText = '\x02 %d Users\x02 on scoreboard with \x02%d Active This Week\x02' % (totalUsersEver, numActiveThisWeek)
         self.reply(irc, msg, infoText, prefixNick=False)
@@ -3556,6 +3578,8 @@ class TriviaTime(callbacks.Plugin):
             Parameter is optional, display up to that number. (eg 20 - display 11-20)
             Channel is only required when using the command outside of a channel.
         """
+        if num is None:
+            num = 1
         num = max(num, 10)
         offset = num-9
         dbLocation = self.registryValue('admin.db')
@@ -4138,6 +4162,8 @@ class TriviaTime(callbacks.Plugin):
         Parameter is optional, display up to that number. (eg 20 - display 11-20)
         Channel is only required when using the command outside of a channel.
         """
+        if num is None:
+            num = 1
         num = max(num, 10)
         offset = num-9
         dbLocation = self.registryValue('admin.db')
@@ -4163,6 +4189,8 @@ class TriviaTime(callbacks.Plugin):
             Parameter is optional, display up to that number. (eg 20 - display 11-20)
             Channel is only required when using the command outside of a channel.
         """
+        if num is None:
+            num = 1
         num = max(num, 10)
         offset = num-9
         dbLocation = self.registryValue('admin.db')
